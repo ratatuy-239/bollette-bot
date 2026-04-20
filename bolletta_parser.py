@@ -36,8 +36,8 @@ def parse_bolletta(pdf_path: str) -> dict | None:
     energia_match = re.search(r'A\s+Quota Consumi:\s*([\d]+[,\.][\d]+)', text, re.IGNORECASE)
     costo_energia = float(energia_match.group(1).replace(",", ".")) if energia_match else None
 
-    # Total: "Importo totale da\npagare\n140,00 €"
-    total_match = re.search(r'Importo totale da\s+pagare\s+([\d]+[,\.][\d]+)\s*€', text, re.IGNORECASE)
+    # Total: "Importo totale da 140,00 €\npagare"
+    total_match = re.search(r'Importo totale da\s+([\d]+[,\.][\d]+)\s*€', text, re.IGNORECASE)
     total = float(total_match.group(1).replace(",", ".")) if total_match else None
 
     if not all([month, kwh_total, costo_energia, total]):
