@@ -90,28 +90,20 @@ class SheetsClient:
     # Read results
     # -------------------------
     def get_month_result(self, month: str) -> dict | None:
-        """Read calculated columns H–L for a month from Luce sheet.
-        H=Mese, I=Costo 1kWh, J=A testa su, K=A testa giu, L=Torna?
+        """Read columns J and K for a month from Luce sheet (results table in col H).
+        H=Mese, J=A testa sopra, K=A testa sotto
         """
         sheet = self._get_sheet(SHEET_LUCE)
-
-        # Results table starts at H column (col 8), header in row 1
-        # Find month in column H
-        col_h = sheet.col_values(8)  # H
+        col_h = sheet.col_values(8)  # column H
         for i, cell in enumerate(col_h):
             if cell.strip().lower() == month.strip().lower():
                 row = i + 1
                 row_data = sheet.row_values(row)
-                # H=col8(idx7), I=col9(idx8), J=col10(idx9), K=col11(idx10), L=col12(idx11)
-                try:
-                    return {
-                        "costo_kwh": row_data[8] if len(row_data) > 8 else "—",
-                        "a_testa_su": row_data[9] if len(row_data) > 9 else "—",
-                        "a_testa_giu": row_data[10] if len(row_data) > 10 else "—",
-                        "torna": row_data[11] if len(row_data) > 11 else "—",
-                    }
-                except IndexError:
-                    return None
+                # J=col10(idx9), K=col11(idx10)
+                return {
+                    "a_testa_su": row_data[9] if len(row_data) > 9 else "—",
+                    "a_testa_giu": row_data[10] if len(row_data) > 10 else "—",
+                }
         return None
 
     def get_luce_row(self, month: str) -> dict | None:

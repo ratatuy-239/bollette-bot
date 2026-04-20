@@ -1,6 +1,7 @@
 import logging
 import os
 import tempfile
+from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
@@ -112,34 +113,36 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     data = context.user_data
-    month = data["month"]
+    billing_month = data["month"]  # month from the bill (e.g. Marzo)
+    current_month = MONTHS[datetime.now().month - 1]  # current calendar month (e.g. Aprile)
 
     await update.message.reply_text("⏳ Salvataggio in corso...")
 
     try:
-        sheets.write_contatore(month, data["counter_su"])
+        # Counter reading goes to current month row in Contatore Picotti
+        sheets.write_contatore(current_month, data["counter_su"])
+        # Bill data goes to billing period month row in Luce
         sheets.write_luce(
-            month,
+            billing_month,
             data["costo_energia"],
             data["costo_accessori"],
             data["kwh_total"]
         )
 
-        result = sheets.get_month_result(month)
+        result = sheets.get_month_result(billing_month)
 
         if result:
             await update.message.reply_text(
-                f"✅ *Dati salvati per {month}!*\n\n"
-                f"📊 *Risultato:*\n"
-                f"💰 Costo 1 kWh: €{result['costo_kwh']}\n"
+                f"✅ *Dati salvati!*\n\n"
+                f"📅 Bolletta: {billing_month} | Contatore: {current_month}\n\n"
+                f"📊 *Risultato per {billing_month}:*\n"
                 f"👤 A testa sopra: €{result['a_testa_su']}\n"
-                f"👤 A testa sotto: €{result['a_testa_giu']}\n"
-                f"🔄 Torna?: {result['torna']}",
+                f"👤 A testa sotto: €{result['a_testa_giu']}",
                 parse_mode="Markdown"
             )
         else:
             await update.message.reply_text(
-                f"✅ Dati salvati per {month}!\n"
+                f"✅ Dati salvati! Bolletta: {billing_month}, contatore: {current_month}\n"
                 "⚠️ Non riesco a leggere i risultati calcolati — controlla il foglio."
             )
     except Exception as e:
@@ -187,10 +190,8 @@ async def get_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if result:
             msg += (
                 f"\n📈 *Risultati calcolati:*\n"
-                f"💰 Costo 1 kWh: €{result['costo_kwh']}\n"
                 f"👤 A testa sopra: €{result['a_testa_su']}\n"
-                f"👤 A testa sotto: €{result['a_testa_giu']}\n"
-                f"🔄 Torna?: {result['torna']}"
+                f"👤 A testa sotto: €{result['a_testa_giu']}"
             )
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
