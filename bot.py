@@ -201,6 +201,14 @@ async def get_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        info = sheets.debug_info()
+        await update.message.reply_text(f"🔍 *Dati nei fogli:*\n\n{info}", parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Errore: `{e}`", parse_mode="Markdown")
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operazione annullata.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
@@ -232,6 +240,7 @@ def main():
     )
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("debug", debug))
     app.add_handler(add_conv)
     app.add_handler(get_conv)
 

@@ -106,6 +106,14 @@ class SheetsClient:
                 }
         return None
 
+    def debug_info(self) -> str:
+        lines = []
+        for sheet_name in [SHEET_CONTATORE, SHEET_LUCE]:
+            sheet = self._get_sheet(sheet_name)
+            col_a = sheet.col_values(1)
+            lines.append(f"*{sheet_name}* — col A: {col_a[:15]}")
+        return "\n\n".join(lines)
+
     def get_luce_row(self, month: str) -> dict | None:
         """Read a Luce row for a given month."""
         sheet = self._get_sheet(SHEET_LUCE)
