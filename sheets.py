@@ -32,12 +32,13 @@ class SheetsClient:
         return self.spreadsheet.worksheet(name)
 
     def _find_month_row(self, sheet, month: str) -> int | None:
-        """Find row index (1-based) for a given month name. Returns None if not found."""
+        """Find row index (1-based) for a given month name. Returns the LAST match."""
         col_a = sheet.col_values(1)
+        result = None
         for i, cell in enumerate(col_a):
             if cell.strip().lower() == month.strip().lower():
-                return i + 1  # 1-based
-        return None
+                result = i + 1
+        return result
 
     def _next_empty_row(self, sheet) -> int:
         """Find first empty row in column A (1-based)."""
@@ -106,12 +107,23 @@ class SheetsClient:
                 }
         return None
 
-    def debug_info(self) -> str:
+    def debug_info(self, current_month: str, billing_month: str) -> str:
         lines = []
-        for sheet_name in [SHEET_CONTATORE, SHEET_LUCE]:
-            sheet = self._get_sheet(sheet_name)
-            col_a = sheet.col_values(1)
-            lines.append(f"*{sheet_name}* — col A: {col_a[:15]}")
+
+        sheet_c = self._get_sheet(SHEET_CONTATORE)
+        row_c = self._find_month_row(sheet_c, current_month)
+        lines.append(
+            f"*Contatore Picotti*\n"
+            f"Cerco: '{current_month}' → riga {row_c or 'NON TROVATA'}"
+        )
+
+        sheet_l = self._get_sheet(SHEET_LUCE)
+        row_l = self._find_month_row(sheet_l, billing_month)
+        lines.append(
+            f"*Luce*\n"
+            f"Cerco: '{billing_month}' → riga {row_l or 'NON TROVATA'}"
+        )
+
         return "\n\n".join(lines)
 
     def get_luce_row(self, month: str) -> dict | None:

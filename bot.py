@@ -203,8 +203,13 @@ async def get_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        info = sheets.debug_info()
-        await update.message.reply_text(f"🔍 *Dati nei fogli:*\n\n{info}", parse_mode="Markdown")
+        current_month = MONTHS[datetime.now().month - 1]
+        billing_month = MONTHS[(datetime.now().month - 2) % 12]  # previous month as example
+        info = sheets.debug_info(current_month, billing_month)
+        await update.message.reply_text(
+            f"🔍 *Debug* (contatore={current_month}, bolletta={billing_month}):\n\n{info}",
+            parse_mode="Markdown"
+        )
     except Exception as e:
         await update.message.reply_text(f"❌ Errore: `{e}`", parse_mode="Markdown")
 
