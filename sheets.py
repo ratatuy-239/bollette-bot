@@ -79,11 +79,11 @@ class SheetsClient:
         values = [month, costo_energia, costo_accessori, kwh_total]
 
         if row:
-            sheet.update(f"A{row}:D{row}", [values])
+            sheet.update([values], f"A{row}:D{row}")
             logger.info(f"Updated Luce row {row} for {month}")
         else:
             next_row = self._next_empty_row(sheet)
-            sheet.update(f"A{next_row}:D{next_row}", [values])
+            sheet.update([values], f"A{next_row}:D{next_row}")
             logger.info(f"Inserted Luce row {next_row} for {month}")
 
     # -------------------------
