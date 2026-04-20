@@ -1,5 +1,6 @@
 import logging
 import os
+import tempfile
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
@@ -10,6 +11,7 @@ from telegram.ext import (
     ContextTypes,
 )
 from sheets import SheetsClient
+from bolletta_parser import parse_bolletta
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -17,8 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Conversation states
-MONTH, COUNTER_SU, COSTO_ENERGIA, COSTO_ACCESSORI, KWH_TOTAL, CONFIRM = range(6)
+WAITING_PDF, COUNTER_SU, CONFIRM = range(3)
 
 MONTHS = [
     "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
@@ -32,32 +33,49 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Ciao! Sono il tuo assistente per le bollette della luce.\n\n"
         "Comandi disponibili:\n"
-        "/add — aggiungere dati del mese\n"
+        "/add — aggiungere dati del mese (invia il PDF della bolletta)\n"
         "/get — visualizzare i dati di un mese\n"
         "/cancel — annullare l'operazione in corso"
     )
 
 
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[m] for m in MONTHS]
     await update.message.reply_text(
-        "📅 Seleziona il mese:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        "📎 Invia il PDF della bolletta E.ON e leggo i dati automaticamente."
     )
-    return MONTH
+    return WAITING_PDF
 
 
-async def add_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    month = update.message.text.strip()
-    if month not in MONTHS:
-        await update.message.reply_text("❌ Mese non valido. Scegli dalla lista.")
-        return MONTH
-    context.user_data["month"] = month
+async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    doc = update.message.document
+    await update.message.reply_text("⏳ Leggo la bolletta...")
+
+    # Download to a temp file
+    tg_file = await context.bot.get_file(doc.file_id)
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp_path = tmp.name
+    await tg_file.download_to_drive(tmp_path)
+
+    data = parse_bolletta(tmp_path)
+    os.unlink(tmp_path)
+
+    if not data:
+        await update.message.reply_text(
+            "❌ Non riesco a leggere i dati dalla bolletta.\n"
+            "Assicurati di inviare una bolletta E.ON in formato PDF."
+        )
+        return WAITING_PDF
+
+    context.user_data.update(data)
+
     await update.message.reply_text(
-        f"✅ Mese: {month}\n\n"
-        "🔌 Inserisci le letture del contatore di *sopra* (Contatore Picotti, colonna B):\n"
-        "Esempio: `2672.9`",
-        reply_markup=ReplyKeyboardRemove(),
+        f"✅ *Dati estratti dalla bolletta:*\n\n"
+        f"📅 Mese: {data['month']}\n"
+        f"⚡ kWh totali: {data['kwh_total']}\n"
+        f"💶 Costo energia: €{data['costo_energia']}\n"
+        f"💶 Costo accessori: €{data['costo_accessori']}\n\n"
+        f"🔌 Inserisci le letture attuali del contatore di *sopra*:\n"
+        f"Esempio: `2672.9`",
         parse_mode="Markdown"
     )
     return COUNTER_SU
@@ -68,71 +86,18 @@ async def add_counter_su(update: Update, context: ContextTypes.DEFAULT_TYPE):
         val = float(update.message.text.replace(",", "."))
         context.user_data["counter_su"] = val
     except ValueError:
-        await update.message.reply_text("❌ Inserisci un numero valido. Esempio: `2672.9`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "❌ Inserisci un numero valido. Esempio: `2672.9`", parse_mode="Markdown"
+        )
         return COUNTER_SU
 
-    await update.message.reply_text(
-        "💶 Inserisci il *costo energia* (colonna B del foglio Luce):\n"
-        "Esempio: `87.99`",
-        parse_mode="Markdown"
-    )
-    return COSTO_ENERGIA
-
-
-async def add_costo_energia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        val = float(update.message.text.replace(",", "."))
-        context.user_data["costo_energia"] = val
-    except ValueError:
-        await update.message.reply_text("❌ Inserisci un numero valido. Esempio: `87.99`", parse_mode="Markdown")
-        return COSTO_ENERGIA
-
-    await update.message.reply_text(
-        "💶 Inserisci il *costo accessori* (colonna C del foglio Luce):\n"
-        "Esempio: `52.01`",
-        parse_mode="Markdown"
-    )
-    return COSTO_ACCESSORI
-
-
-async def add_costo_accessori(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        parts = [float(p.replace(",", ".")) for p in update.message.text.replace(" ", "").split("+")]
-        val = round(sum(parts), 2)
-        context.user_data["costo_accessori"] = val
-    except ValueError:
-        await update.message.reply_text(
-            "❌ Inserisci un numero valido. Esempi: `52.01` oppure `24+30+17`",
-            parse_mode="Markdown"
-        )
-        return COSTO_ACCESSORI
-
-    await update.message.reply_text(
-        f"✅ Costo accessori: {val}\n\n"
-        "⚡ Inserisci i *kWh totali* (colonna D del foglio Luce):\n"
-        "Esempio: `350.77`",
-        parse_mode="Markdown"
-    )
-    return KWH_TOTAL
-
-
-async def add_kwh_total(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        val = float(update.message.text.replace(",", "."))
-        context.user_data["kwh_total"] = val
-    except ValueError:
-        await update.message.reply_text("❌ Inserisci un numero valido. Esempio: `350.77`", parse_mode="Markdown")
-        return KWH_TOTAL
-
     data = context.user_data
-    month = data["month"]
-
     await update.message.reply_text(
         f"📋 *Riepilogo dati da inserire:*\n\n"
-        f"📅 Mese: {month}\n"
+        f"📅 Mese: {data['month']}\n"
         f"🔌 Contatore sopra: {data['counter_su']}\n"
-        f"💶 Costo energia: {data['costo_energia']}\n"
-        f"💶 Costo accessori: {data['costo_accessori']}\n"
+        f"💶 Costo energia: €{data['costo_energia']}\n"
+        f"💶 Costo accessori: €{data['costo_accessori']}\n"
         f"⚡ kWh totali: {data['kwh_total']}\n\n"
         f"Confermo e salvo? Rispondi *sì* oppure *no*.",
         parse_mode="Markdown"
@@ -152,7 +117,6 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Salvataggio in corso...")
 
     try:
-        # Write to both sheets
         sheets.write_contatore(month, data["counter_su"])
         sheets.write_luce(
             month,
@@ -161,7 +125,6 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data["kwh_total"]
         )
 
-        # Read back results
         result = sheets.get_month_result(month)
 
         if result:
@@ -196,19 +159,16 @@ async def get_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📅 Per quale mese vuoi vedere i dati?",
         reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
-    return MONTH
+    return 10  # separate state namespace for /get
 
 
 async def get_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     month = update.message.text.strip()
     if month not in MONTHS:
         await update.message.reply_text("❌ Mese non valido.")
-        return MONTH
+        return 10
 
-    await update.message.reply_text(
-        "⏳ Recupero dati...",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    await update.message.reply_text("⏳ Recupero dati...", reply_markup=ReplyKeyboardRemove())
 
     try:
         row = sheets.get_luce_row(month)
@@ -241,10 +201,7 @@ async def get_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "❌ Operazione annullata.",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    await update.message.reply_text("❌ Operazione annullata.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
 
@@ -255,25 +212,20 @@ def main():
 
     app = Application.builder().token(token).build()
 
-    # /add conversation
     add_conv = ConversationHandler(
         entry_points=[CommandHandler("add", add_start)],
         states={
-            MONTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_month)],
+            WAITING_PDF: [MessageHandler(filters.Document.PDF, handle_pdf)],
             COUNTER_SU: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_counter_su)],
-            COSTO_ENERGIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_costo_energia)],
-            COSTO_ACCESSORI: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_costo_accessori)],
-            KWH_TOTAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_kwh_total)],
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_data)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    # /get conversation
     get_conv = ConversationHandler(
         entry_points=[CommandHandler("get", get_start)],
         states={
-            MONTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_month)],
+            10: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_month)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
