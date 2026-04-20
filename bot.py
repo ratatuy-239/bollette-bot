@@ -21,6 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 WAITING_PDF, COUNTER_SU, CONFIRM = range(3)
+POSTINO_MONTH = 20
 
 MONTHS = [
     "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
@@ -36,6 +37,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Comandi disponibili:\n"
         "/add — aggiungere dati del mese (invia il PDF della bolletta)\n"
         "/get — visualizzare i dati di un mese\n"
+        "/postino — generare il messaggio bollettino per la chat\n"
         "/cancel — annullare l'operazione in corso"
     )
 
@@ -106,6 +108,29 @@ async def add_counter_su(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CONFIRM
 
 
+def build_bollettino(current_month: str, billing_month: str, luce_a_testa: str) -> str:
+    return (
+        f"🎊🎉 BOLLETTINO di {current_month.upper()}\n"
+        f"\n"
+        f"UTENZE 💸💸💸\n"
+        f" Sono arrivate le bollette di :     {billing_month.upper()}\n"
+        f"Gas ⛽️   €  a Testa\n"
+        f"Luce 💡 {luce_a_testa}€ a Testa\n"
+        f"\n"
+        f"Trovate tutto su Split\n"
+        f"Per favore look split e mettersi in pari anche direttamente in soluzione unica con l'affittame o PAYPAL\n"
+        f"\n"
+        f"Pulizie   🧹 \n"
+        f"Joe torna 22 aprile\n"
+        f"GARAGE\n"
+        f"Codice 4314E\n"
+        f"\n"
+        f"Picotti Extra things\n"
+        f"    GANZO 🐠 \n"
+        f"Non lo dimentichiamo"
+    )
+
+
 async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
     if text not in ["sì", "si", "yes", "да", "ок", "ok"]:
@@ -139,6 +164,9 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👤 A testa sopra: €{result['a_testa_su']}\n"
                 f"👤 A testa sotto: €{result['a_testa_giu']}",
                 parse_mode="Markdown"
+            )
+            await update.message.reply_text(
+                build_bollettino(current_month, billing_month, result["a_testa_giu"])
             )
         else:
             await update.message.reply_text(
@@ -201,6 +229,63 @@ async def get_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+def build_bollettino(current_month: str, billing_month: str, luce_a_testa: str) -> str:
+    return (
+        f"🎊🎉 BOLLETTINO di {current_month.upper()}\n"
+        f"\n"
+        f"UTENZE 💸💸💸\n"
+        f" Sono arrivate le bollette di :     {billing_month.upper()}\n"
+        f"Gas ⛽️   €  a Testa\n"
+        f"Luce 💡 {luce_a_testa}€ a Testa\n"
+        f"\n"
+        f"Trovate tutto su Split\n"
+        f"Per favore look split e mettersi in pari anche direttamente in soluzione unica con l'affittame o PAYPAL\n"
+        f"\n"
+        f"Pulizie   🧹 \n"
+        f"Joe torna 22 aprile\n"
+        f"GARAGE\n"
+        f"Codice 4314E\n"
+        f"\n"
+        f"Picotti Extra things\n"
+        f"    GANZO 🐠 \n"
+        f"Non lo dimentichiamo"
+    )
+
+
+async def postino_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[m] for m in MONTHS]
+    await update.message.reply_text(
+        "📅 Per quale mese vuoi generare il bollettino?\n(scegli il mese della bolletta)",
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    )
+    return POSTINO_MONTH
+
+
+async def postino_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    billing_month = update.message.text.strip()
+    if billing_month not in MONTHS:
+        await update.message.reply_text("❌ Mese non valido.")
+        return POSTINO_MONTH
+
+    await update.message.reply_text("⏳ Recupero dati...", reply_markup=ReplyKeyboardRemove())
+
+    try:
+        result = sheets.get_month_result(billing_month)
+        if not result:
+            await update.message.reply_text(f"❌ Nessun risultato trovato per {billing_month}.")
+            return ConversationHandler.END
+
+        current_month = MONTHS[datetime.now().month - 1]
+        await update.message.reply_text(
+            build_bollettino(current_month, billing_month, result["a_testa_giu"])
+        )
+    except Exception as e:
+        logger.error(f"Postino error: {e}")
+        await update.message.reply_text(f"❌ Errore: `{str(e)}`", parse_mode="Markdown")
+
+    return ConversationHandler.END
+
+
 async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         current_month = MONTHS[datetime.now().month - 1]
@@ -244,10 +329,19 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    postino_conv = ConversationHandler(
+        entry_points=[CommandHandler("postino", postino_start)],
+        states={
+            POSTINO_MONTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, postino_send)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("debug", debug))
     app.add_handler(add_conv)
     app.add_handler(get_conv)
+    app.add_handler(postino_conv)
 
     logger.info("Bot started")
     app.run_polling()
