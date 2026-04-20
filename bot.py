@@ -18,7 +18,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Conversation states
-MONTH, COUNTER_SU, COSTO_ENERGIA, COSTO_ACCESSORI, KWH_TOTAL, KWH_SU, CONFIRM = range(7)
+MONTH, COUNTER_SU, COSTO_ENERGIA, COSTO_ACCESSORI, KWH_TOTAL, CONFIRM = range(6)
 
 MONTHS = [
     "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
@@ -97,13 +97,18 @@ async def add_costo_energia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_costo_accessori(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        val = float(update.message.text.replace(",", "."))
+        parts = [float(p.replace(",", ".")) for p in update.message.text.replace(" ", "").split("+")]
+        val = round(sum(parts), 2)
         context.user_data["costo_accessori"] = val
     except ValueError:
-        await update.message.reply_text("❌ Inserisci un numero valido. Esempio: `52.01`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "❌ Inserisci un numero valido. Esempi: `52.01` oppure `24+30+17`",
+            parse_mode="Markdown"
+        )
         return COSTO_ACCESSORI
 
     await update.message.reply_text(
+        f"✅ Costo accessori: {val}\n\n"
         "⚡ Inserisci i *kWh totali* (colonna D del foglio Luce):\n"
         "Esempio: `350.77`",
         parse_mode="Markdown"
@@ -119,28 +124,8 @@ async def add_kwh_total(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Inserisci un numero valido. Esempio: `350.77`", parse_mode="Markdown")
         return KWH_TOTAL
 
-    await update.message.reply_text(
-        "⚡ Inserisci i *kWh di sopra* (colonna E del foglio Luce):\n"
-        "Esempio: `108.9`",
-        parse_mode="Markdown"
-    )
-    return KWH_SU
-
-
-async def add_kwh_su(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        val = float(update.message.text.replace(",", "."))
-        context.user_data["kwh_su"] = val
-    except ValueError:
-        await update.message.reply_text("❌ Inserisci un numero valido. Esempio: `108.9`", parse_mode="Markdown")
-        return KWH_SU
-
     data = context.user_data
     month = data["month"]
-
-    # kWh giu = total - su
-    kwh_giu = round(data["kwh_total"] - data["kwh_su"], 2)
-    data["kwh_giu"] = kwh_giu
 
     await update.message.reply_text(
         f"📋 *Riepilogo dati da inserire:*\n\n"
@@ -148,9 +133,7 @@ async def add_kwh_su(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔌 Contatore sopra: {data['counter_su']}\n"
         f"💶 Costo energia: {data['costo_energia']}\n"
         f"💶 Costo accessori: {data['costo_accessori']}\n"
-        f"⚡ kWh totali: {data['kwh_total']}\n"
-        f"⚡ kWh sopra: {data['kwh_su']}\n"
-        f"⚡ kWh sotto: {kwh_giu}\n\n"
+        f"⚡ kWh totali: {data['kwh_total']}\n\n"
         f"Confermo e salvo? Rispondi *sì* oppure *no*.",
         parse_mode="Markdown"
     )
@@ -175,9 +158,7 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
             month,
             data["costo_energia"],
             data["costo_accessori"],
-            data["kwh_total"],
-            data["kwh_su"],
-            data["kwh_giu"]
+            data["kwh_total"]
         )
 
         # Read back results
@@ -242,8 +223,6 @@ async def get_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💶 Costo energia: €{row.get('costo_energia', '—')}\n"
             f"💶 Costo accessori: €{row.get('costo_accessori', '—')}\n"
             f"⚡ kWh totali: {row.get('kwh_total', '—')}\n"
-            f"⚡ kWh sopra: {row.get('kwh_su', '—')}\n"
-            f"⚡ kWh sotto: {row.get('kwh_giu', '—')}\n"
         )
         if result:
             msg += (
@@ -285,7 +264,6 @@ def main():
             COSTO_ENERGIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_costo_energia)],
             COSTO_ACCESSORI: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_costo_accessori)],
             KWH_TOTAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_kwh_total)],
-            KWH_SU: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_kwh_su)],
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_data)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],

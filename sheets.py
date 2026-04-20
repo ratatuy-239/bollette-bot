@@ -68,22 +68,22 @@ class SheetsClient:
     # -------------------------
     # Luce sheet
     # -------------------------
-    def write_luce(self, month: str, costo_energia: float, costo_accessori: float,
-                   kwh_total: float, kwh_su: float, kwh_giu: float):
+    def write_luce(self, month: str, costo_energia: float, costo_accessori: float, kwh_total: float):
         """Write or update Luce row for a month.
-        Columns: A=Mese, B=Costo energia, C=Costo accessori, D=Kwh total, E=Kwh su, F=Kwh giu
+        Columns: A=Mese, B=Costo energia, C=Costo accessori, D=Kwh total
+        kWh su and kWh giu are calculated automatically by the spreadsheet.
         """
         sheet = self._get_sheet(SHEET_LUCE)
         row = self._find_month_row(sheet, month)
 
-        values = [month, costo_energia, costo_accessori, kwh_total, kwh_su, kwh_giu]
+        values = [month, costo_energia, costo_accessori, kwh_total]
 
         if row:
-            sheet.update(f"A{row}:F{row}", [values])
+            sheet.update(f"A{row}:D{row}", [values])
             logger.info(f"Updated Luce row {row} for {month}")
         else:
             next_row = self._next_empty_row(sheet)
-            sheet.update(f"A{next_row}:F{next_row}", [values])
+            sheet.update(f"A{next_row}:D{next_row}", [values])
             logger.info(f"Inserted Luce row {next_row} for {month}")
 
     # -------------------------
@@ -126,6 +126,4 @@ class SheetsClient:
             "costo_energia": row_data[1] if len(row_data) > 1 else "—",
             "costo_accessori": row_data[2] if len(row_data) > 2 else "—",
             "kwh_total": row_data[3] if len(row_data) > 3 else "—",
-            "kwh_su": row_data[4] if len(row_data) > 4 else "—",
-            "kwh_giu": row_data[5] if len(row_data) > 5 else "—",
         }
