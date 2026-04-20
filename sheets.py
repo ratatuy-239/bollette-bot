@@ -96,16 +96,18 @@ class SheetsClient:
         """
         sheet = self._get_sheet(SHEET_LUCE)
         col_h = sheet.col_values(8)  # column H
+        row = None
         for i, cell in enumerate(col_h):
             if cell.strip().lower() == month.strip().lower():
-                row = i + 1
-                row_data = sheet.row_values(row)
-                # J=col10(idx9), K=col11(idx10)
-                return {
-                    "a_testa_su": row_data[9] if len(row_data) > 9 else "—",
-                    "a_testa_giu": row_data[10] if len(row_data) > 10 else "—",
-                }
-        return None
+                row = i + 1  # keep overwriting → last match wins
+        if row is None:
+            return None
+        row_data = sheet.row_values(row)
+        # J=col10(idx9), K=col11(idx10)
+        return {
+            "a_testa_su": row_data[9] if len(row_data) > 9 else "—",
+            "a_testa_giu": row_data[10] if len(row_data) > 10 else "—",
+        }
 
     def debug_info(self, current_month: str, billing_month: str) -> str:
         lines = []
