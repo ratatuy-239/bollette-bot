@@ -19,6 +19,11 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
+# httpx logs every request URL at INFO, and the bot token is part of the
+# Telegram API path — that would write the token into Cloud Logging in clear
+# text on every call.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 WAITING_PDF, COUNTER_SU, CONFIRM = range(3)
