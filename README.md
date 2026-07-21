@@ -66,12 +66,31 @@ git push -u origin main
 Cloud Run гасит контейнер до нуля и не тарифицирует простой. Бесплатный лимит —
 2 млн запросов в месяц, бот расходует пару десятков.
 
+Текущая установка:
+
+| | |
+|---|---|
+| Проект | `idyllic-parser-493511-q3` |
+| Сервис | `bollette-bot`, регион `europe-west1` |
+| Работает от имени | `picotti-bot@idyllic-parser-493511-q3.iam.gserviceaccount.com` |
+| Адрес | `https://bollette-bot-325120116454.europe-west1.run.app` |
+
 **1. Поставить gcloud и залогиниться**
 
+Если нет Homebrew — скачать напрямую:
+
 ```bash
-brew install --cask google-cloud-sdk
+curl -o gcloud.tar.gz https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-arm.tar.gz
+tar -xzf gcloud.tar.gz -C "$HOME"
+"$HOME/google-cloud-sdk/install.sh" --usage-reporting=false --path-update=true
+```
+
+Установщик может ругнуться, что не смог поставить системный Python через sudo —
+это необязательная часть, у SDK есть свой встроенный.
+
+```bash
 gcloud auth login
-gcloud config set project ТВОЙ_PROJECT_ID
+gcloud config set project idyllic-parser-493511-q3
 ```
 
 **2. Включить нужные API**
@@ -80,18 +99,31 @@ gcloud config set project ТВОЙ_PROJECT_ID
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
 ```
 
+Требуется привязанный к проекту платёжный аккаунт. Cloud Run укладывается в
+бесплатный лимит (2 млн запросов в месяц), бот расходует пару десятков.
+
 **3. Заполнить переменные**
 
 ```bash
 cp env.yaml.example env.yaml
 ```
 
-Открой `env.yaml`, вставь токен и содержимое `credentials.json` одной строкой.
-`WEBHOOK_URL` пока оставь как есть — адрес появится только после первого деплоя.
+Нужны только `TELEGRAM_TOKEN` и `WEBHOOK_SECRET`, остальное уже заполнено.
+Секрет сгенерировать так:
+
+```bash
+python3 -c "import secrets;print(secrets.token_urlsafe(32))"
+```
 
 > `env.yaml` в `.gitignore` — в репозиторий он не попадёт.
 
-**4. Первый деплой**
+Ключ сервис-аккаунта не нужен: сервис запускается от имени `picotti-bot`
+и авторизуется в Google по этой личности. См. `SheetsClient._build_credentials`.
+
+`WEBHOOK_URL` известен заранее — Cloud Run собирает адрес по схеме
+`имя-сервиса + номер проекта + регион`, поэтому деплой одноразовый.
+
+**4. Деплой**
 
 ```bash
 gcloud run deploy bollette-bot \
@@ -99,16 +131,16 @@ gcloud run deploy bollette-bot \
   --region europe-west1 \
   --allow-unauthenticated \
   --min-instances 0 \
+  --service-account picotti-bot@idyllic-parser-493511-q3.iam.gserviceaccount.com \
   --env-vars-file env.yaml
 ```
 
-В конце gcloud напечатает адрес вида
-`https://bollette-bot-xxxxxxxx.europe-west1.run.app`
+`--allow-unauthenticated` нужен, чтобы Telegram мог достучаться. Эндпоинт
+защищён секретным заголовком: запрос без него получает 403.
 
-**5. Прописать адрес и передеплоить**
-
-Вставь этот адрес в `env.yaml` как `WEBHOOK_URL` и повтори ту же команду деплоя.
-Со второго раза бот сам зарегистрирует webhook в Telegram при старте.
+> **Токен не должен попадать в URL.** Cloud Run пишет адрес каждого запроса в
+> свой журнал, поэтому токен в пути утёк бы в логи. Путь фиксированный
+> (`/telegram`), проверка — через заголовок `secret_token`, заголовки не логируются.
 
 ---
 
