@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import google.auth
 from google.oauth2.service_account import Credentials
 import gspread
 
@@ -19,14 +20,29 @@ SHEET_CONTATORE = "Contatore Picotti"
 
 class SheetsClient:
     def __init__(self):
-        creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-        if not creds_json:
-            raise ValueError("GOOGLE_CREDENTIALS_JSON environment variable not set")
-
-        creds_dict = json.loads(creds_json)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        creds = self._build_credentials()
         self.gc = gspread.authorize(creds)
         self.spreadsheet = self.gc.open_by_key(SPREADSHEET_ID)
+
+    @staticmethod
+    def _build_credentials():
+        """Authenticate against Google.
+
+        On Cloud Run the service runs as the service account itself, so no key
+        material is needed — google.auth.default() picks up the attached
+        identity. GOOGLE_CREDENTIALS_JSON stays supported for running the bot
+        outside this project (locally, or on another host).
+        """
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        if creds_json:
+            logger.info("Authenticating with GOOGLE_CREDENTIALS_JSON")
+            return Credentials.from_service_account_info(
+                json.loads(creds_json), scopes=SCOPES
+            )
+
+        logger.info("Authenticating with the attached service account")
+        creds, _ = google.auth.default(scopes=SCOPES)
+        return creds
 
     def _get_sheet(self, name):
         return self.spreadsheet.worksheet(name)
