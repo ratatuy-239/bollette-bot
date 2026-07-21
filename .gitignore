@@ -1,0 +1,9 @@
+# Credentials — never commit these
+env.yaml
+credentials.json
+
+__pycache__/
+*.pyc
+venv/
+.DS_Store
+.claude/

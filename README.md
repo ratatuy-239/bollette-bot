@@ -7,8 +7,10 @@
 ## Команды бота
 
 - `/start` — приветствие и список команд
-- `/add` — внести данные за месяц (диалог по шагам)
+- `/add` — внести данные за месяц (прислать PDF болле́тты, дальше по шагам)
 - `/get` — посмотреть данные и итоги за месяц
+- `/postino` — сгенерировать текст болеттино для чата
+- `/debug` — проверить, находит ли бот нужные строки в таблице
 - `/cancel` — отменить текущую операцию
 
 ---
@@ -58,37 +60,97 @@ git push -u origin main
 
 ---
 
-### Шаг 4 — Задеплоить на Railway
+### Шаг 4 — Задеплоить на Google Cloud Run (бесплатно)
 
-1. Открой [railway.app](https://railway.app) → **Login with GitHub**
-2. Нажми **New Project → Deploy from GitHub repo**
-3. Выбери репозиторий `bollette-bot`
-4. После деплоя перейди в **Variables** и добавь:
+Бот работает через **webhook**: между сообщениями не крутится ни одного процесса,
+Cloud Run гасит контейнер до нуля и не тарифицирует простой. Бесплатный лимит —
+2 млн запросов в месяц, бот расходует пару десятков.
 
-| Переменная | Значение |
-|---|---|
-| `TELEGRAM_TOKEN` | Токен от BotFather |
-| `GOOGLE_CREDENTIALS_JSON` | Всё содержимое файла credentials.json |
-| `SPREADSHEET_ID` | `1zLO85tPtJkAyPclcWYlTCSlznz-oFtzOqUvhwFMtUTg` |
+**1. Поставить gcloud и залогиниться**
 
-5. Railway автоматически перезапустит бота после добавления переменных
+```bash
+brew install --cask google-cloud-sdk
+gcloud auth login
+gcloud config set project ТВОЙ_PROJECT_ID
+```
+
+**2. Включить нужные API**
+
+```bash
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+```
+
+**3. Заполнить переменные**
+
+```bash
+cp env.yaml.example env.yaml
+```
+
+Открой `env.yaml`, вставь токен и содержимое `credentials.json` одной строкой.
+`WEBHOOK_URL` пока оставь как есть — адрес появится только после первого деплоя.
+
+> `env.yaml` в `.gitignore` — в репозиторий он не попадёт.
+
+**4. Первый деплой**
+
+```bash
+gcloud run deploy bollette-bot \
+  --source . \
+  --region europe-west1 \
+  --allow-unauthenticated \
+  --min-instances 0 \
+  --env-vars-file env.yaml
+```
+
+В конце gcloud напечатает адрес вида
+`https://bollette-bot-xxxxxxxx.europe-west1.run.app`
+
+**5. Прописать адрес и передеплоить**
+
+Вставь этот адрес в `env.yaml` как `WEBHOOK_URL` и повтори ту же команду деплоя.
+Со второго раза бот сам зарегистрирует webhook в Telegram при старте.
 
 ---
 
 ### Шаг 5 — Проверить
 
-Открой Telegram, найди своего бота по username и отправь `/start`
+Открой Telegram, найди своего бота по username и отправь `/start`.
+
+Первое сообщение после долгого простоя идёт с задержкой в несколько секунд —
+это Cloud Run поднимает уснувший контейнер. Дальше отвечает мгновенно.
+
+Если бот молчит, посмотреть логи:
+
+```bash
+gcloud run services logs read bollette-bot --region europe-west1 --limit 50
+```
+
+---
+
+## Локальный запуск
+
+Без `WEBHOOK_URL` бот поднимается в режиме polling — публичный адрес не нужен:
+
+```bash
+pip install -r requirements.txt
+export TELEGRAM_TOKEN="..."
+export GOOGLE_CREDENTIALS_JSON="$(cat credentials.json)"
+python bot.py
+```
 
 ---
 
 ## Структура файлов
 
 ```
-electricity_bot/
-├── bot.py          # Основная логика бота
-├── sheets.py       # Работа с Google Sheets
+bollette-bot/
+├── bot.py             # Основная логика бота
+├── sheets.py          # Работа с Google Sheets
+├── bolletta_parser.py # Разбор PDF бollette E.ON
+├── Dockerfile         # Сборка контейнера для Cloud Run
+├── env.yaml.example   # Шаблон переменных окружения
 ├── requirements.txt
-├── railway.toml    # Конфиг Railway
+├── railway.toml       # Старый конфиг Railway (больше не используется)
 └── .gitignore
 ```
 
