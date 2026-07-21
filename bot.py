@@ -367,13 +367,26 @@ def main():
         # Cloud Run mode: Telegram pushes updates to us, so nothing runs between
         # messages and the instance scales down to zero (and bills zero).
         port = int(os.environ.get("PORT", "8080"))
+
+        # The usual trick is to put the token in the URL path, but Cloud Run
+        # writes every request URL to its access log, which would leak the
+        # token. Keep the path non-secret and authenticate with the secret
+        # token header instead — headers are not logged.
+        secret = os.environ.get("WEBHOOK_SECRET")
+        if not secret:
+            raise ValueError(
+                "WEBHOOK_SECRET must be set in webhook mode — it is what stops "
+                "anyone who knows the URL from posting fake updates."
+            )
+        path = os.environ.get("WEBHOOK_PATH", "telegram")
+
         logger.info(f"Bot started in webhook mode on port {port}")
         app.run_webhook(
             listen="0.0.0.0",
             port=port,
-            url_path=token,
-            webhook_url=f"{webhook_url.rstrip('/')}/{token}",
-            secret_token=os.environ.get("WEBHOOK_SECRET") or None,
+            url_path=path,
+            webhook_url=f"{webhook_url.rstrip('/')}/{path}",
+            secret_token=secret,
         )
     else:
         # Local development: no public URL needed.
