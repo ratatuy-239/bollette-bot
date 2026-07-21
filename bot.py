@@ -8,6 +8,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     ConversationHandler,
+    PicklePersistence,
     filters,
     ContextTypes,
 )
@@ -28,7 +29,25 @@ MONTHS = [
     "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"
 ]
 
-sheets = SheetsClient()
+# Multi-step conversations (/add spans PDF → counter → confirm) keep their state
+# here so a redeploy mid-dialogue doesn't lose it. On Cloud Run the filesystem is
+# ephemeral, so this survives redeploys of a warm instance but not a cold start.
+STATE_FILE = os.environ.get("STATE_FILE", "/tmp/bot_state.pickle")
+
+_sheets = None
+
+
+def get_sheets() -> SheetsClient:
+    """Lazily build the Sheets client.
+
+    On Cloud Run the container starts on the first incoming request, so we keep
+    cold starts cheap and avoid crashing the whole container when credentials
+    are missing — the error surfaces in the chat instead.
+    """
+    global _sheets
+    if _sheets is None:
+        _sheets = SheetsClient()
+    return _sheets
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -145,16 +164,16 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         # Counter reading goes to current month row in Contatore Picotti
-        sheets.write_contatore(current_month, data["counter_su"])
+        get_sheets().write_contatore(current_month, data["counter_su"])
         # Bill data goes to billing period month row in Luce
-        sheets.write_luce(
+        get_sheets().write_luce(
             billing_month,
             data["costo_energia"],
             data["costo_accessori"],
             data["kwh_total"]
         )
 
-        result = sheets.get_month_result(billing_month)
+        result = get_sheets().get_month_result(billing_month)
 
         if result:
             await update.message.reply_text(
@@ -202,8 +221,8 @@ async def get_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Recupero dati...", reply_markup=ReplyKeyboardRemove())
 
     try:
-        row = sheets.get_luce_row(month)
-        result = sheets.get_month_result(month)
+        row = get_sheets().get_luce_row(month)
+        result = get_sheets().get_month_result(month)
 
         if not row:
             await update.message.reply_text(f"❌ Nessun dato trovato per {month}.")
@@ -229,29 +248,6 @@ async def get_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-def build_bollettino(current_month: str, billing_month: str, luce_a_testa: str) -> str:
-    return (
-        f"🎊🎉 BOLLETTINO di {current_month.upper()}\n"
-        f"\n"
-        f"UTENZE 💸💸💸\n"
-        f" Sono arrivate le bollette di :     {billing_month.upper()}\n"
-        f"Gas ⛽️   €  a Testa\n"
-        f"Luce 💡 {luce_a_testa}€ a Testa\n"
-        f"\n"
-        f"Trovate tutto su Split\n"
-        f"Per favore look split e mettersi in pari anche direttamente in soluzione unica con l'affittame o PAYPAL\n"
-        f"\n"
-        f"Pulizie   🧹 \n"
-        f"Joe torna 22 aprile\n"
-        f"GARAGE\n"
-        f"Codice 4314E\n"
-        f"\n"
-        f"Picotti Extra things\n"
-        f"    GANZO 🐠 \n"
-        f"Non lo dimentichiamo"
-    )
-
-
 async def postino_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[m] for m in MONTHS]
     await update.message.reply_text(
@@ -270,7 +266,7 @@ async def postino_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Recupero dati...", reply_markup=ReplyKeyboardRemove())
 
     try:
-        result = sheets.get_month_result(billing_month)
+        result = get_sheets().get_month_result(billing_month)
         if not result:
             await update.message.reply_text(f"❌ Nessun risultato trovato per {billing_month}.")
             return ConversationHandler.END
@@ -290,7 +286,7 @@ async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         current_month = MONTHS[datetime.now().month - 1]
         billing_month = MONTHS[(datetime.now().month - 2) % 12]  # previous month as example
-        info = sheets.debug_info(current_month, billing_month)
+        info = get_sheets().debug_info(current_month, billing_month)
         await update.message.reply_text(
             f"🔍 *Debug* (contatore={current_month}, bolletta={billing_month}):\n\n{info}",
             parse_mode="Markdown"
@@ -304,12 +300,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-def main():
-    token = os.environ.get("TELEGRAM_TOKEN")
-    if not token:
-        raise ValueError("TELEGRAM_TOKEN environment variable not set")
-
-    app = Application.builder().token(token).build()
+def build_app(token: str) -> Application:
+    persistence = PicklePersistence(filepath=STATE_FILE)
+    app = (
+        Application.builder()
+        .token(token)
+        .persistence(persistence)
+        .build()
+    )
 
     add_conv = ConversationHandler(
         entry_points=[CommandHandler("add", add_start)],
@@ -319,6 +317,8 @@ def main():
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_data)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        name="add_conv",
+        persistent=True,
     )
 
     get_conv = ConversationHandler(
@@ -327,6 +327,8 @@ def main():
             10: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_month)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        name="get_conv",
+        persistent=True,
     )
 
     postino_conv = ConversationHandler(
@@ -335,6 +337,8 @@ def main():
             POSTINO_MONTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, postino_send)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        name="postino_conv",
+        persistent=True,
     )
 
     app.add_handler(CommandHandler("start", start))
@@ -343,8 +347,33 @@ def main():
     app.add_handler(get_conv)
     app.add_handler(postino_conv)
 
-    logger.info("Bot started")
-    app.run_polling()
+    return app
+
+
+def main():
+    token = os.environ.get("TELEGRAM_TOKEN")
+    if not token:
+        raise ValueError("TELEGRAM_TOKEN environment variable not set")
+
+    app = build_app(token)
+    webhook_url = os.environ.get("WEBHOOK_URL")
+
+    if webhook_url:
+        # Cloud Run mode: Telegram pushes updates to us, so nothing runs between
+        # messages and the instance scales down to zero (and bills zero).
+        port = int(os.environ.get("PORT", "8080"))
+        logger.info(f"Bot started in webhook mode on port {port}")
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=token,
+            webhook_url=f"{webhook_url.rstrip('/')}/{token}",
+            secret_token=os.environ.get("WEBHOOK_SECRET") or None,
+        )
+    else:
+        # Local development: no public URL needed.
+        logger.info("Bot started in polling mode (no WEBHOOK_URL set)")
+        app.run_polling()
 
 
 if __name__ == "__main__":
